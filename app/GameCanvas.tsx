@@ -11,7 +11,7 @@ let globalHandLandmarker: HandLandmarker | null = null;
 export default function GameCanvas() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const requestRef = useRef<number>();
+  const requestRef = useRef<number | undefined>(undefined);
 
   const [score, setScore] = useState(0);
   const [isGameOver, setIsGameOver] = useState(false);
@@ -301,4 +301,4 @@ export default function GameCanvas() {
       />
     </div>
   );
-}\
+}
