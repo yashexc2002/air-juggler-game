@@ -257,26 +257,26 @@ export default function GameCanvas() {
   }, []);
 
   return (
-    <div className="relative mt-8 rounded-xl overflow-hidden border-4 border-cyan-500 shadow-[0_0_20px_rgba(6,182,212,0.5)] bg-black w-[640px] h-[480px]">
-      <div className="absolute top-4 left-4 z-20 bg-black/60 px-4 py-2 rounded-lg border border-cyan-500">
-        <p className="text-2xl font-bold text-cyan-300">
+    <div className="relative mt-8 aspect-[4/3] w-full max-w-[640px] overflow-hidden rounded-xl border-4 border-cyan-500 bg-black shadow-[0_0_20px_rgba(6,182,212,0.5)]">
+      <div className="absolute left-2 top-2 z-20 rounded-lg border border-cyan-500 bg-black/60 px-3 py-1.5 sm:left-4 sm:top-4 sm:px-4 sm:py-2">
+        <p className="text-lg font-bold text-cyan-300 sm:text-2xl">
           Score: {score}
         </p>
       </div>
 
       {isGameOver && (
         <div className="absolute inset-0 z-30 bg-black/80 flex flex-col items-center justify-center backdrop-blur-sm">
-          <h2 className="text-5xl font-bold text-pink-500 mb-2 drop-shadow-[0_0_15px_rgba(236,72,153,0.8)]">
+          <h2 className="mb-2 text-3xl font-bold text-pink-500 drop-shadow-[0_0_15px_rgba(236,72,153,0.8)] sm:text-5xl">
             GAME OVER
           </h2>
 
-          <p className="text-xl text-white mb-6">
+          <p className="mb-6 text-base text-white sm:text-xl">
             Final Score: {score}
           </p>
 
           <button
             onClick={restartGame}
-            className="px-6 py-3 bg-cyan-500 hover:bg-cyan-400 text-black font-bold rounded-full transition-all shadow-[0_0_15px_rgba(6,182,212,0.5)]"
+            className="rounded-full bg-cyan-500 px-5 py-2.5 font-bold text-black shadow-[0_0_15px_rgba(6,182,212,0.5)] transition-all hover:bg-cyan-400 sm:px-6 sm:py-3"
           >
             Play Again
           </button>
@@ -290,14 +290,14 @@ export default function GameCanvas() {
         muted
         width={640}
         height={480}
-        className="absolute inset-0 transform -scale-x-100 z-0"
+        className="absolute inset-0 z-0 h-full w-full -scale-x-100 object-cover"
       />
 
       <canvas
         ref={canvasRef}
         width={640}
         height={480}
-        className="absolute inset-0 z-10"
+        className="absolute inset-0 z-10 h-full w-full"
       />
     </div>
   );
