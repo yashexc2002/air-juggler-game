@@ -6,6 +6,12 @@ import {
   HandLandmarker,
 } from "@mediapipe/tasks-vision";
 
+const CANVAS_WIDTH = 640;
+const CANVAS_HEIGHT = 480;
+const BALL_SPEED = 300;
+const HAND_DETECTION_INTERVAL = 1000 / 20;
+const HAND_RADIUS = 35;
+
 let globalHandLandmarker: HandLandmarker | null = null;
 
 export default function GameCanvas() {
@@ -17,24 +23,28 @@ export default function GameCanvas() {
   const [isGameOver, setIsGameOver] = useState(false);
 
   const gameState = useRef({
-    ballX: 320,
+    ballX: CANVAS_WIDTH / 2,
     ballY: 100,
-    speedX: 5,
-    speedY: 5,
+    speedX: BALL_SPEED,
+    speedY: BALL_SPEED,
     radius: 15,
     score: 0,
     isGameOver: false,
+    handX: -100,
+    handY: -100,
   });
 
   const restartGame = () => {
     gameState.current = {
-      ballX: 320,
+      ballX: CANVAS_WIDTH / 2,
       ballY: 100,
-      speedX: 5,
-      speedY: 5,
+      speedX: BALL_SPEED,
+      speedY: BALL_SPEED,
       radius: 15,
       score: 0,
       isGameOver: false,
+      handX: -100,
+      handY: -100,
     };
 
     setScore(0);
@@ -42,6 +52,11 @@ export default function GameCanvas() {
   };
 
   useEffect(() => {
+    let isMounted = true;
+    let cameraStream: MediaStream | null = null;
+    let lastFrameTime = performance.now();
+    let lastHandDetectionTime = 0;
+
     const setupAI = async () => {
       if (
         navigator.mediaDevices &&
@@ -50,10 +65,16 @@ export default function GameCanvas() {
         try {
           const stream =
             await navigator.mediaDevices.getUserMedia({
-              video: { width: 640, height: 480 },
+              video: {
+                facingMode: "user",
+                width: { ideal: CANVAS_WIDTH },
+                height: { ideal: CANVAS_HEIGHT },
+                frameRate: { ideal: 30, max: 30 },
+              },
             });
+          cameraStream = stream;
 
-          if (videoRef.current) {
+          if (videoRef.current && isMounted) {
             videoRef.current.srcObject = stream;
           }
         } catch (err) {
@@ -61,18 +82,9 @@ export default function GameCanvas() {
         }
       }
 
-      if (typeof window !== "undefined") {
-        // @ts-ignore
-        if (window.handLandmarkerInstance) {
-          detectHands();
-          return;
-        }
-
-        // @ts-ignore
-        if (window.isAILoading) return;
-
-        // @ts-ignore
-        window.isAILoading = true;
+      if (globalHandLandmarker) {
+        detectHands();
+        return;
       }
 
       try {
@@ -80,48 +92,65 @@ export default function GameCanvas() {
           "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
         );
 
-        const instance =
-          await HandLandmarker.createFromOptions(
-            vision,
-            {
-              baseOptions: {
-                modelAssetPath:
-                  "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-                delegate: "GPU",
-              },
-              runningMode: "VIDEO",
-              numHands: 1,
-            }
-          );
+        const modelOptions = {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate: "GPU" as const,
+          },
+          runningMode: "VIDEO" as const,
+          numHands: 1,
+        };
 
-        if (typeof window !== "undefined") {
-          // @ts-ignore
-          window.handLandmarkerInstance = instance;
+        try {
+          globalHandLandmarker =
+            await HandLandmarker.createFromOptions(
+              vision,
+              modelOptions
+            );
+        } catch (gpuError) {
+          console.warn(
+            "GPU hand tracking unavailable, using CPU.",
+            gpuError
+          );
+          globalHandLandmarker =
+            await HandLandmarker.createFromOptions(vision, {
+              ...modelOptions,
+              baseOptions: {
+                ...modelOptions.baseOptions,
+                delegate: "CPU",
+              },
+            });
         }
 
         detectHands();
       } catch (error) {
         console.error("AI error:", error);
-      } finally {
-        if (typeof window !== "undefined") {
-          // @ts-ignore
-          window.isAILoading = false;
-        }
       }
     };
 
-    const detectHands = async () => {
-      // @ts-ignore
-      const model = window.handLandmarkerInstance;
+    const detectHands = () => {
+      if (!isMounted) {
+        return;
+      }
+
       const canvas = canvasRef.current;
       const ctx = canvas?.getContext("2d");
       const video = videoRef.current;
       const state = gameState.current;
+      const now = performance.now();
+      const deltaTime = Math.min(
+        (now - lastFrameTime) / 1000,
+        0.05
+      );
+      lastFrameTime = now;
 
       if (
         video &&
         video.readyState === 4 &&
-        model &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0 &&
+        globalHandLandmarker &&
         ctx &&
         canvas
       ) {
@@ -138,17 +167,22 @@ export default function GameCanvas() {
           return;
         }
 
-        state.ballX += state.speedX;
-        state.ballY += state.speedY;
+        state.ballX += state.speedX * deltaTime;
+        state.ballY += state.speedY * deltaTime;
 
         if (
           state.ballX - state.radius <= 0 ||
           state.ballX + state.radius >= canvas.width
         ) {
+          state.ballX = Math.max(
+            state.radius,
+            Math.min(canvas.width - state.radius, state.ballX)
+          );
           state.speedX *= -1;
         }
 
         if (state.ballY - state.radius <= 0) {
+          state.ballY = state.radius;
           state.speedY *= -1;
         }
 
@@ -160,70 +194,79 @@ export default function GameCanvas() {
           setIsGameOver(true);
         }
 
-        const results = model.detectForVideo(
-          video,
-          performance.now()
-        );
+        if (now - lastHandDetectionTime >= HAND_DETECTION_INTERVAL) {
+          lastHandDetectionTime = now;
+          const results = globalHandLandmarker.detectForVideo(
+            video,
+            now
+          );
 
-        let handX = -100;
-        let handY = -100;
+          if (results.landmarks?.length) {
+            const landmarks = results.landmarks[0];
+            const palm = [0, 5, 9, 13, 17].reduce(
+              (center, index) => ({
+                x: center.x + landmarks[index].x / 5,
+                y: center.y + landmarks[index].y / 5,
+              }),
+              { x: 0, y: 0 }
+            );
+            const scale = Math.max(
+              canvas.width / video.videoWidth,
+              canvas.height / video.videoHeight
+            );
+            const renderedWidth = video.videoWidth * scale;
+            const renderedHeight = video.videoHeight * scale;
+            const cropX = (renderedWidth - canvas.width) / 2;
+            const cropY = (renderedHeight - canvas.height) / 2;
+            const detectedHandX =
+              canvas.width - palm.x * renderedWidth + cropX;
+            const detectedHandY =
+              palm.y * renderedHeight - cropY;
 
-        if (
-          results.landmarks &&
-          results.landmarks.length > 0
-        ) {
-          const palm = results.landmarks[0][9];
+            if (state.handX < 0) {
+              state.handX = detectedHandX;
+              state.handY = detectedHandY;
+            } else {
+              state.handX +=
+                (detectedHandX - state.handX) * 0.35;
+              state.handY +=
+                (detectedHandY - state.handY) * 0.35;
+            }
 
-          handX =
-            (1 - palm.x) * canvas.width;
+            const dx = state.ballX - state.handX;
+            const dy = state.ballY - state.handY;
+            const distance = Math.hypot(dx, dy);
 
-          handY =
-            palm.y * canvas.height;
+            if (
+              distance < state.radius + HAND_RADIUS &&
+              state.speedY > 0
+            ) {
+              state.speedY = -Math.abs(state.speedY);
+              state.speedX = Math.max(
+                -BALL_SPEED * 1.5,
+                Math.min(BALL_SPEED * 1.5, dx * 8)
+              );
+              state.score += 1;
+              setScore(state.score);
+              state.speedY -= 30;
+            }
+          }
+        }
 
+        if (state.handX >= 0) {
           ctx.beginPath();
           ctx.arc(
-            handX,
-            handY,
-            35,
+            state.handX,
+            state.handY,
+            HAND_RADIUS,
             0,
             2 * Math.PI
           );
-
-          ctx.fillStyle =
-            "rgba(6, 182, 212, 0.4)";
+          ctx.fillStyle = "rgba(6, 182, 212, 0.4)";
           ctx.fill();
-
           ctx.lineWidth = 3;
           ctx.strokeStyle = "#06b6d4";
           ctx.stroke();
-
-          const dx =
-            state.ballX - handX;
-
-          const dy =
-            state.ballY - handY;
-
-          const distance = Math.sqrt(
-            dx * dx + dy * dy
-          );
-
-          if (
-            distance <
-              state.radius + 35 &&
-            state.speedY > 0
-          ) {
-            state.speedY =
-              -Math.abs(state.speedY);
-
-            state.speedX =
-              dx * 0.15;
-
-            state.score += 1;
-
-            setScore(state.score);
-
-            state.speedY -= 0.5;
-          }
         }
 
         ctx.beginPath();
@@ -250,9 +293,11 @@ export default function GameCanvas() {
     setupAI();
 
     return () => {
+      isMounted = false;
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current);
       }
+      cameraStream?.getTracks().forEach((track) => track.stop());
     };
   }, []);
 
@@ -288,15 +333,15 @@ export default function GameCanvas() {
         autoPlay
         playsInline
         muted
-        width={640}
-        height={480}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
         className="absolute inset-0 z-0 h-full w-full -scale-x-100 object-cover"
       />
 
       <canvas
         ref={canvasRef}
-        width={640}
-        height={480}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
         className="absolute inset-0 z-10 h-full w-full"
       />
     </div>
